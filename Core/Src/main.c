@@ -23,7 +23,12 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+#include <stdio.h>
+
 #include "oled.h"
+#include "uart.h"
+#include "sensor_bmp180.h"
+#include "sensor_BH1750.h"
 
 /* USER CODE END Includes */
 
@@ -49,13 +54,43 @@ SPI_HandleTypeDef hspi2;
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
-/* Definitions for defaultTask */
+float  		environment_pressure = 0;
+float 		environment_temperature = 0.0;
+//uint16_t  environment_light = 0;
+
+/* Definitions for tasks */
+
+/*
+osThreadId_t ;
+const osThreadAttr_t _attributes = {
+	.name = "",
+	.stack_size = 128 * ,
+	.priority = (osPriority_t) osPriorityNormal,
+};
+*/
+
+
 osThreadId_t defaultTaskHandle;
 const osThreadAttr_t defaultTask_attributes = {
   .name = "defaultTask",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
+
+osThreadId_t uartDebugTaskHandle;
+const osThreadAttr_t uartDebugTask_attributes = {
+	.name = "uartDebug",
+	.stack_size = 128 * 4,
+	.priority = (osPriority_t) osPriorityNormal,
+};
+
+osThreadId_t getSensorDataTaskHandle;
+const osThreadAttr_t getSensorDataTask_attributes = {
+	.name = "getSensorData",
+	.stack_size = 128 * 4,
+	.priority = (osPriority_t) osPriorityNormal,
+};
+
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -67,7 +102,12 @@ static void MX_I2C1_Init(void);
 static void MX_SPI2_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
+
+
 void StartDefaultTask(void *argument);
+void StartUartDebugTask(void *argument);
+void StartGetSensorDataTask(void *argument);
+
 
 /* USER CODE BEGIN PFP */
 
@@ -141,12 +181,23 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
+	
+	uartDebugTaskHandle = osThreadNew(StartUartDebugTask, NULL, &uartDebugTask_attributes);
+	
+	HAL_I2C_Init(&hi2c1);
+	BMP180_Init();
+//	BH1750_Send_Cmd(POWER_ON_CMD);
+//	BH1750_Send_Cmd(RESET_REGISTER);
+//	BH1750_Send_Cmd(CONT_H_MODE);
+	
+	getSensorDataTaskHandle = osThreadNew(StartGetSensorDataTask, NULL, &getSensorDataTask_attributes);
+	
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
   /* add events, ... */
   /* USER CODE END RTOS_EVENTS */
-
+	
   /* Start scheduler */
   osKernelStart();
 
@@ -438,12 +489,66 @@ void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
   /* Infinite loop */
+	
+	char buffer[32];
   for(;;)
   {
-		OLED_ShowString(2, 2, "Hello World");
+		sprintf(buffer, "Pres: %.2f", environment_pressure);
+		OLED_ShowString(2, 0, buffer);
+		
+		sprintf(buffer, "Temp: %.2f", environment_temperature);
+		OLED_ShowString(2, 2, buffer);
+		
+//		sprintf(buffer, "Light: %d", environment_light);
+//		OLED_ShowString(2, 4, buffer);
+
     osDelay(1);
   }
   /* USER CODE END 5 */
+}
+
+void StartUartDebugTask(void *argument){
+	
+	char buffer[32];
+	
+	for(;;){
+		UartSend(&huart1, "Environment Status:\n");
+		
+		sprintf(buffer, "Pressure: %f\n", environment_pressure);
+		UartSend(&huart1, buffer);
+		
+		sprintf(buffer, "Temperature: %f\n", environment_temperature);
+		UartSend(&huart1, buffer);
+		
+//		sprintf(buffer, "Light: %d\n", environment_light);
+//		UartSend(&huart1, buffer);
+		
+		osDelay(1000);
+	}
+}
+
+void StartGetSensorDataTask(void *argument){
+	
+	uint8_t lightData_Raw[2];
+	
+	for(;;){
+		
+		environment_pressure = BMP180_GetPressure();
+		environment_temperature = BMP180_GetTemperature();
+		
+//		if(BH1750_Send_Cmd(CONT_H_MODE) == HAL_OK){
+//			HAL_Delay(200);
+//			if(BH1750_Read_Dat(&lightData_Raw) == HAL_OK){
+//				environment_light = BH1750_Dat_To_Lux(&lightData_Raw);
+//			}
+//		}
+//		else{
+//			UartSend(&huart1, "CMD Send Error");
+//		}
+		
+		osDelay(1000);
+	}
+
 }
 
 /**
