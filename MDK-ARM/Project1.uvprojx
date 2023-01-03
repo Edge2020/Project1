@@ -474,6 +474,16 @@
               <FileType>1</FileType>
               <FilePath>..\Core\Src\sensor_BH1750.c</FilePath>
             </File>
+            <File>
+              <FileName>sensor_DHT11.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Core\Inc\sensor_DHT11.h</FilePath>
+            </File>
+            <File>
+              <FileName>sensor_DHT11.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\sensor_DHT11.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

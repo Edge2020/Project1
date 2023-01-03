@@ -29,6 +29,7 @@
 #include "uart.h"
 #include "sensor_bmp180.h"
 #include "sensor_BH1750.h"
+#include "sensor_DHT11.h"
 
 /* USER CODE END Includes */
 
@@ -54,8 +55,11 @@ SPI_HandleTypeDef hspi2;
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
-float  		environment_pressure = 0;
-float 		environment_temperature = 0.0;
+float  	environment_pressure 						=	 0.0;
+float 	environment_temperature_BMP180 	=	 0.0;
+float 	environment_temperature_DHT11 	=	 0.0;
+float		environment_humidity 						=	 0.0;
+
 //uint16_t  environment_light = 0;
 
 /* Definitions for tasks */
@@ -73,22 +77,29 @@ const osThreadAttr_t _attributes = {
 osThreadId_t defaultTaskHandle;
 const osThreadAttr_t defaultTask_attributes = {
   .name = "defaultTask",
-  .stack_size = 128 * 4,
+  .stack_size = 128 * 16,
   .priority = (osPriority_t) osPriorityNormal,
 };
 
 osThreadId_t uartDebugTaskHandle;
 const osThreadAttr_t uartDebugTask_attributes = {
 	.name = "uartDebug",
-	.stack_size = 128 * 4,
+	.stack_size = 128 * 16,
 	.priority = (osPriority_t) osPriorityNormal,
 };
 
 osThreadId_t getSensorDataTaskHandle;
 const osThreadAttr_t getSensorDataTask_attributes = {
-	.name = "getSensorData",
-	.stack_size = 128 * 4,
+	.name = "sensorData",
+	.stack_size = 128 * 16,
 	.priority = (osPriority_t) osPriorityNormal,
+};
+
+osThreadId_t get1WireDataTaskHandle;
+const osThreadAttr_t get1WireDataTask_attributes = {
+	.name = "1WireData",
+	.stack_size = 128 * 16,
+	.priority = (osPriority_t) osPriorityHigh,
 };
 
 /* USER CODE BEGIN PV */
@@ -107,6 +118,7 @@ static void MX_USART2_UART_Init(void);
 void StartDefaultTask(void *argument);
 void StartUartDebugTask(void *argument);
 void StartGetSensorDataTask(void *argument);
+void StartGet1WireDataTask(void *argument);
 
 
 /* USER CODE BEGIN PFP */
@@ -154,6 +166,12 @@ int main(void)
 	
 	OLED_Init();
 
+	HAL_I2C_Init(&hi2c1);
+	BMP180_Init();
+//	BH1750_Send_Cmd(POWER_ON_CMD);
+//	BH1750_Send_Cmd(RESET_REGISTER);
+//	BH1750_Send_Cmd(CONT_H_MODE);
+
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -182,15 +200,9 @@ int main(void)
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
 	
-	uartDebugTaskHandle = osThreadNew(StartUartDebugTask, NULL, &uartDebugTask_attributes);
-	
-	HAL_I2C_Init(&hi2c1);
-	BMP180_Init();
-//	BH1750_Send_Cmd(POWER_ON_CMD);
-//	BH1750_Send_Cmd(RESET_REGISTER);
-//	BH1750_Send_Cmd(CONT_H_MODE);
-	
-	getSensorDataTaskHandle = osThreadNew(StartGetSensorDataTask, NULL, &getSensorDataTask_attributes);
+	uartDebugTaskHandle 			= 	osThreadNew(StartUartDebugTask, NULL, &uartDebugTask_attributes);
+	getSensorDataTaskHandle 	= 	osThreadNew(StartGetSensorDataTask, NULL, &getSensorDataTask_attributes);
+	get1WireDataTaskHandle	  = 	osThreadNew(StartGet1WireDataTask, NULL, &get1WireDataTask_attributes);
 	
   /* USER CODE END RTOS_THREADS */
 
@@ -410,7 +422,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(OLED_CS_GPIO_Port, OLED_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(DCDC_EN_GPIO_Port, DCDC_EN_Pin, GPIO_PIN_SET);
@@ -456,8 +468,8 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : PA8 */
   GPIO_InitStruct.Pin = GPIO_PIN_8;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PA11 PA15 */
@@ -493,15 +505,20 @@ void StartDefaultTask(void *argument)
 	char buffer[32];
   for(;;)
   {
-		sprintf(buffer, "Pres: %.2f", environment_pressure);
+		sprintf(buffer, "Pres:  %8.2f", environment_pressure);
 		OLED_ShowString(2, 0, buffer);
 		
-		sprintf(buffer, "Temp: %.2f", environment_temperature);
+		sprintf(buffer, "Temp1: %8.2f", environment_temperature_BMP180);
 		OLED_ShowString(2, 2, buffer);
 		
 //		sprintf(buffer, "Light: %d", environment_light);
 //		OLED_ShowString(2, 4, buffer);
-
+		sprintf(buffer, "Temp2: %8.2f", environment_temperature_DHT11);
+		OLED_ShowString(2, 4, buffer);
+		
+		sprintf(buffer, "Humi:  %8.2f", environment_humidity);
+		OLED_ShowString(2, 6, buffer);
+		
     osDelay(1);
   }
   /* USER CODE END 5 */
@@ -509,16 +526,25 @@ void StartDefaultTask(void *argument)
 
 void StartUartDebugTask(void *argument){
 	
-	char buffer[32];
+	char buffer[48];
 	
 	for(;;){
-		UartSend(&huart1, "Environment Status:\n");
+		UartSend(&huart1, "\nEnvironment Status:\n");
 		
 		sprintf(buffer, "Pressure: %f\n", environment_pressure);
 		UartSend(&huart1, buffer);
 		
-		sprintf(buffer, "Temperature: %f\n", environment_temperature);
+		sprintf(buffer, "Temperature(BMP180): %f\n", environment_temperature_BMP180);
 		UartSend(&huart1, buffer);
+		
+		sprintf(buffer, "Temperature(DHT11): %f\n", environment_temperature_DHT11);
+		UartSend(&huart1, buffer);
+		
+		sprintf(buffer, "Humidity: %f\n", environment_humidity);
+		UartSend(&huart1, buffer);
+		
+		UartSend(&huart1, "\n");
+	
 		
 //		sprintf(buffer, "Light: %d\n", environment_light);
 //		UartSend(&huart1, buffer);
@@ -529,12 +555,13 @@ void StartUartDebugTask(void *argument){
 
 void StartGetSensorDataTask(void *argument){
 	
-	uint8_t lightData_Raw[2];
+	//uint8_t lightData_Raw[2];
 	
 	for(;;){
 		
 		environment_pressure = BMP180_GetPressure();
-		environment_temperature = BMP180_GetTemperature();
+		
+		environment_temperature_BMP180 = BMP180_GetTemperature();
 		
 //		if(BH1750_Send_Cmd(CONT_H_MODE) == HAL_OK){
 //			HAL_Delay(200);
@@ -546,7 +573,19 @@ void StartGetSensorDataTask(void *argument){
 //			UartSend(&huart1, "CMD Send Error");
 //		}
 		
-		osDelay(1000);
+		osDelay(500);
+	}
+
+}
+
+void StartGet1WireDataTask(void *argument){
+	
+	osDelay(1000);
+	
+	for(;;){
+		DHT11_Read_Data(&environment_humidity, &environment_temperature_DHT11);
+
+		osDelay(2000);
 	}
 
 }
@@ -580,6 +619,9 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
+	
+	UartSend(&huart1, "!!!Error_Handle!!!\n");
+	
   __disable_irq();
   while (1)
   {
