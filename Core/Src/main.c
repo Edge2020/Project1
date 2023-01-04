@@ -34,6 +34,8 @@
 #include "u8g2.h"
 #include "u8x8.h"
 
+#include "icon.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -62,8 +64,9 @@ float  	environment_pressure 						=	 0.0;
 float 	environment_temperature_BMP180 	=	 0.0;
 float 	environment_temperature_DHT11 	=	 0.0;
 float		environment_humidity 						=	 0.0;
-
 //uint16_t  environment_light = 0;
+
+char str_buffer[32];
 
 /* Definitions for tasks */
 
@@ -681,7 +684,7 @@ uint8_t u8x8_stm32_gpio_and_delay(U8X8_UNUSED u8x8_t *u8x8, U8X8_UNUSED uint8_t 
 	return 1;
 }
 
-void u8g2_Init(u8g2_t *u8g2){
+void u8g2_Init(u8g2_t *u8g2) {
 	u8g2_Setup_ssd1306_128x64_noname_f(u8g2, U8G2_R0, u8x8_byte_4wire_hw_spi, u8x8_stm32_gpio_and_delay);
 	u8g2_InitDisplay(u8g2);
 	u8g2_SetPowerSave(u8g2, 0);
@@ -690,30 +693,33 @@ void u8g2_Init(u8g2_t *u8g2){
 
 
 void u8g2_Draw(u8g2_t *u8g2) {
-    u8g2_SetFontMode(u8g2, 1);
-    u8g2_SetFontDirection(u8g2, 0);
-    u8g2_SetFont(u8g2, u8g2_font_inb24_mf);
-    u8g2_DrawStr(u8g2, 0, 20, "U");
-    
-    u8g2_SetFontDirection(u8g2, 1);
-    u8g2_SetFont(u8g2, u8g2_font_inb30_mn);
-    u8g2_DrawStr(u8g2, 21,8,"8");
-        
-    u8g2_SetFontDirection(u8g2, 0);
-    u8g2_SetFont(u8g2, u8g2_font_inb24_mf);
-    u8g2_DrawStr(u8g2, 51,30,"g");
-    u8g2_DrawStr(u8g2, 67,30,"\xb2");
-    
-    u8g2_DrawHLine(u8g2, 2, 35, 47);
-    u8g2_DrawHLine(u8g2, 3, 36, 47);
-    u8g2_DrawVLine(u8g2, 45, 32, 12);
-    u8g2_DrawVLine(u8g2, 46, 33, 12);
-  
-    u8g2_SetFont(u8g2, u8g2_font_4x6_tr);
-    u8g2_DrawStr(u8g2, 1,54,"github.com/olikraus/u8g2");
+	
+	u8g2_DrawXBMP(u8g2, 4, 0, 16, 16, icon_temp);
+	u8g2_DrawXBMP(u8g2, 4, 16, 16, 16, icon_temp);
+	u8g2_DrawXBMP(u8g2, 4, 32, 16, 16, icon_pres);
+	u8g2_DrawXBMP(u8g2, 4, 48, 16, 16, icon_humi);
+	
+	u8g2_SetFontDirection(u8g2, 1);
+	u8g2_SetFontDirection(u8g2, 0);
+	u8g2_SetFont(u8g2, u8g2_font_4x6_mf);
+	u8g2_DrawStr(u8g2, 16, 6, "1");
+	u8g2_DrawStr(u8g2, 16, 22, "2");
+	
+	u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
+
+	sprintf(str_buffer, "%4.2f", environment_temperature_BMP180);
+	u8g2_DrawStr(u8g2, 24, 12, str_buffer);
+
+	sprintf(str_buffer, "%4.2f", environment_temperature_DHT11);
+	u8g2_DrawStr(u8g2, 24, 28, str_buffer);
+	
+	sprintf(str_buffer, "%4.2fhPa", environment_pressure);
+	u8g2_DrawStr(u8g2, 24, 44, str_buffer);
+	
+	sprintf(str_buffer, "%4.2f%%", environment_humidity);
+	u8g2_DrawStr(u8g2, 24, 60, str_buffer);
 
 	
-
 }
 
 

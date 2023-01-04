@@ -709,6 +709,11 @@
               <FileType>1</FileType>
               <FilePath>..\Core\Src\u8g2\u8x8_u16toa.c</FilePath>
             </File>
+            <File>
+              <FileName>icon.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Core\Inc\icon.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
