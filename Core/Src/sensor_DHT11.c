@@ -50,7 +50,7 @@ uint8_t DHT11_Read_Bit(void) {
 		delay_us(1);
 	}
 	
-	delay_us(4);
+	delay_us(30);
 	
 	return HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8);
 }
@@ -82,12 +82,11 @@ uint8_t DHT11_Read_Data(float *humi, float *temp) {
 		
 		if(data[4] == (data[0] + data[1] + data[2] + data[3])){
 			UartSend(&huart1, "[CheckSum OK]\n");
-			
+		}
 			*humi = (float)(data[0]);
 			*temp = (float)(data[2]) + (float)(data[3]) / 100;
 			
 			return 1; 
-		}
 	}
 	return 0;
 }

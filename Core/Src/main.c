@@ -31,6 +31,9 @@
 #include "sensor_BH1750.h"
 #include "sensor_DHT11.h"
 
+#include "u8g2.h"
+#include "u8x8.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -84,22 +87,22 @@ const osThreadAttr_t defaultTask_attributes = {
 osThreadId_t uartDebugTaskHandle;
 const osThreadAttr_t uartDebugTask_attributes = {
 	.name = "uartDebug",
-	.stack_size = 128 * 16,
+	.stack_size = 128 * 8,
 	.priority = (osPriority_t) osPriorityNormal,
 };
 
 osThreadId_t getSensorDataTaskHandle;
 const osThreadAttr_t getSensorDataTask_attributes = {
 	.name = "sensorData",
-	.stack_size = 128 * 16,
+	.stack_size = 128 * 8,
 	.priority = (osPriority_t) osPriorityNormal,
 };
 
 osThreadId_t get1WireDataTaskHandle;
 const osThreadAttr_t get1WireDataTask_attributes = {
 	.name = "1WireData",
-	.stack_size = 128 * 16,
-	.priority = (osPriority_t) osPriorityHigh,
+	.stack_size = 128 * 8,
+	.priority = (osPriority_t) osPriorityRealtime,	//Need high priority for 1-wire communication.
 };
 
 /* USER CODE BEGIN PV */
@@ -119,6 +122,11 @@ void StartDefaultTask(void *argument);
 void StartUartDebugTask(void *argument);
 void StartGetSensorDataTask(void *argument);
 void StartGet1WireDataTask(void *argument);
+
+uint8_t u8x8_stm32_gpio_and_delay(U8X8_UNUSED u8x8_t *u8x8, U8X8_UNUSED uint8_t msg, U8X8_UNUSED uint8_t arg_int, U8X8_UNUSED void *arg_ptr);
+uint8_t u8x8_byte_4wire_hw_spi(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,void *arg_ptr);
+void u8g2_Init(u8g2_t *u8g2);
+void u8g2_Draw(u8g2_t *u8g2);
 
 
 /* USER CODE BEGIN PFP */
@@ -164,7 +172,7 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 	
-	OLED_Init();
+	 OLED_Init();
 
 	HAL_I2C_Init(&hi2c1);
 	BMP180_Init();
@@ -216,10 +224,11 @@ int main(void)
   /* We should never get here as control is now taken by the scheduler */
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+
   while (1)
   {
     /* USER CODE END WHILE */
-
+		
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -237,10 +246,13 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -250,15 +262,19 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }
+
+  /** Enables the Clock Security System
+  */
+  HAL_RCC_EnableCSS();
 }
 
 /**
@@ -499,29 +515,34 @@ static void MX_GPIO_Init(void)
 /* USER CODE END Header_StartDefaultTask */
 void StartDefaultTask(void *argument)
 {
-  /* USER CODE BEGIN 5 */
-  /* Infinite loop */
-	
-	char buffer[32];
+	//char buffer[32];
+	u8g2_t u8g2;
+	OLED_RES_Set();	
+	u8g2_Init(&u8g2);
   for(;;)
   {
-		sprintf(buffer, "Pres:  %8.2f", environment_pressure);
-		OLED_ShowString(2, 0, buffer);
-		
-		sprintf(buffer, "Temp1: %8.2f", environment_temperature_BMP180);
-		OLED_ShowString(2, 2, buffer);
-		
-//		sprintf(buffer, "Light: %d", environment_light);
+//		sprintf(buffer, "Pres:  %8.2f", environment_pressure);
+//		OLED_ShowString(2, 0, buffer);
+//		
+//		sprintf(buffer, "Temp1: %8.2f", environment_temperature_BMP180);
+//		OLED_ShowString(2, 2, buffer);
+//		
+////		sprintf(buffer, "Light: %d", environment_light);
+////		OLED_ShowString(2, 4, buffer);
+//		sprintf(buffer, "Temp2: %8.2f", environment_temperature_DHT11);
 //		OLED_ShowString(2, 4, buffer);
-		sprintf(buffer, "Temp2: %8.2f", environment_temperature_DHT11);
-		OLED_ShowString(2, 4, buffer);
+//		
+//		sprintf(buffer, "Humi:  %8.2f", environment_humidity);
+//		OLED_ShowString(2, 6, buffer);
 		
-		sprintf(buffer, "Humi:  %8.2f", environment_humidity);
-		OLED_ShowString(2, 6, buffer);
+		u8g2_FirstPage(&u8g2);
+		do{
+			u8g2_Draw(&u8g2);
+		}while(u8g2_NextPage(&u8g2));
 		
     osDelay(1);
   }
-  /* USER CODE END 5 */
+
 }
 
 void StartUartDebugTask(void *argument){
@@ -542,6 +563,9 @@ void StartUartDebugTask(void *argument){
 		
 		sprintf(buffer, "Humidity: %f\n", environment_humidity);
 		UartSend(&huart1, buffer);
+		
+//		sprintf(buffer, "%lu\n", (unsigned long)HAL_RCC_GetHCLKFreq());
+//		UartSend(&huart1, buffer); 
 		
 		UartSend(&huart1, "\n");
 	
@@ -580,7 +604,7 @@ void StartGetSensorDataTask(void *argument){
 
 void StartGet1WireDataTask(void *argument){
 	
-	osDelay(1000);
+	osDelay(2000);
 	
 	for(;;){
 		DHT11_Read_Data(&environment_humidity, &environment_temperature_DHT11);
@@ -589,6 +613,109 @@ void StartGet1WireDataTask(void *argument){
 	}
 
 }
+
+uint8_t u8x8_byte_4wire_hw_spi(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,void *arg_ptr) {
+	uint8_t i;
+	uint8_t *data = NULL;
+	
+	switch (msg){
+		case U8X8_MSG_BYTE_SEND: 
+			data = (uint8_t*)arg_ptr;
+			if(arg_int == 1){
+				OLED_WR_Byte(data[0], OLED_CMD);
+			}
+			else{
+				for(i = 0; i < arg_int; i++) OLED_WR_Byte(data[i], OLED_DATA);	
+			}
+			break;
+		
+		case U8X8_MSG_BYTE_INIT:
+			OLED_Init();
+			break;
+		
+		case U8X8_MSG_BYTE_SET_DC:
+			arg_int ? OLED_DC_Set() : OLED_DC_Clr();
+			break;
+		
+		case U8X8_MSG_BYTE_START_TRANSFER: 
+			OLED_CS_Set();
+			break;
+		
+		case U8X8_MSG_BYTE_END_TRANSFER: 
+			OLED_CS_Clr();
+			break;
+		
+		default:
+			return 0;
+		
+	}
+	return 1;
+}
+
+
+
+uint8_t u8x8_stm32_gpio_and_delay(U8X8_UNUSED u8x8_t *u8x8, U8X8_UNUSED uint8_t msg, U8X8_UNUSED uint8_t arg_int, U8X8_UNUSED void *arg_ptr) {
+	switch (msg){
+		case U8X8_MSG_GPIO_AND_DELAY_INIT:
+			OLED_Init();
+			HAL_Delay(10);
+			break;
+		
+		case U8X8_MSG_DELAY_MILLI:
+			HAL_Delay(arg_int);
+			break;
+		
+		case U8X8_MSG_GPIO_CS:
+			arg_int ? OLED_CS_Set() : OLED_CS_Clr();
+			break;
+		
+		case U8X8_MSG_GPIO_DC: 
+			arg_int ? OLED_DC_Set() : OLED_DC_Clr();
+			break;
+		
+		case U8X8_MSG_GPIO_RESET:
+			//arg_int ? OLED_RES_Set() : OLED_RES_Clr();
+			break;
+		
+	}
+	return 1;
+}
+
+void u8g2_Init(u8g2_t *u8g2){
+	u8g2_Setup_ssd1306_128x64_noname_f(u8g2, U8G2_R0, u8x8_byte_4wire_hw_spi, u8x8_stm32_gpio_and_delay);
+	u8g2_InitDisplay(u8g2);
+	u8g2_SetPowerSave(u8g2, 0);
+
+}
+
+
+void u8g2_Draw(u8g2_t *u8g2) {
+    u8g2_SetFontMode(u8g2, 1);
+    u8g2_SetFontDirection(u8g2, 0);
+    u8g2_SetFont(u8g2, u8g2_font_inb24_mf);
+    u8g2_DrawStr(u8g2, 0, 20, "U");
+    
+    u8g2_SetFontDirection(u8g2, 1);
+    u8g2_SetFont(u8g2, u8g2_font_inb30_mn);
+    u8g2_DrawStr(u8g2, 21,8,"8");
+        
+    u8g2_SetFontDirection(u8g2, 0);
+    u8g2_SetFont(u8g2, u8g2_font_inb24_mf);
+    u8g2_DrawStr(u8g2, 51,30,"g");
+    u8g2_DrawStr(u8g2, 67,30,"\xb2");
+    
+    u8g2_DrawHLine(u8g2, 2, 35, 47);
+    u8g2_DrawHLine(u8g2, 3, 36, 47);
+    u8g2_DrawVLine(u8g2, 45, 32, 12);
+    u8g2_DrawVLine(u8g2, 46, 33, 12);
+  
+    u8g2_SetFont(u8g2, u8g2_font_4x6_tr);
+    u8g2_DrawStr(u8g2, 1,54,"github.com/olikraus/u8g2");
+
+	
+
+}
+
 
 /**
   * @brief  Period elapsed callback in non blocking mode
