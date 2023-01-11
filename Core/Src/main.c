@@ -64,7 +64,7 @@ float  	environment_pressure 						=	 0.0;
 float 	environment_temperature_BMP180 	=	 0.0;
 float 	environment_temperature_DHT11 	=	 0.0;
 float		environment_humidity 						=	 0.0;
-//uint16_t  environment_light = 0;
+uint16_t  environment_light						  =  0;
 
 char str_buffer[32];
 
@@ -241,7 +241,7 @@ int main(void)
   * @brief System Clock Configuration
   * @retval None
   */
-void SystemClock_Config(void)
+void SystemClock_Config(void)			//PLL 72MHz
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
@@ -279,6 +279,38 @@ void SystemClock_Config(void)
   */
   HAL_RCC_EnableCSS();
 }
+
+//void SystemClock_Config(void)			//HSI 8MHz
+//{
+//  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+//  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+
+//  /** Initializes the RCC Oscillators according to the specified parameters
+//  * in the RCC_OscInitTypeDef structure.
+//  */
+//  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+//  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+//  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+//  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+//  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+//  {
+//    Error_Handler();
+//  }
+
+//  /** Initializes the CPU, AHB and APB buses clocks
+//  */
+//  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+//                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+//  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+//  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+//  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
+//  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+
+//  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+//  {
+//    Error_Handler();
+//  }
+//}
 
 /**
   * @brief I2C1 Initialization Function
@@ -524,20 +556,6 @@ void StartDefaultTask(void *argument)
 	u8g2_Init(&u8g2);
   for(;;)
   {
-//		sprintf(buffer, "Pres:  %8.2f", environment_pressure);
-//		OLED_ShowString(2, 0, buffer);
-//		
-//		sprintf(buffer, "Temp1: %8.2f", environment_temperature_BMP180);
-//		OLED_ShowString(2, 2, buffer);
-//		
-////		sprintf(buffer, "Light: %d", environment_light);
-////		OLED_ShowString(2, 4, buffer);
-//		sprintf(buffer, "Temp2: %8.2f", environment_temperature_DHT11);
-//		OLED_ShowString(2, 4, buffer);
-//		
-//		sprintf(buffer, "Humi:  %8.2f", environment_humidity);
-//		OLED_ShowString(2, 6, buffer);
-		
 		u8g2_FirstPage(&u8g2);
 		do{
 			u8g2_Draw(&u8g2);
@@ -567,14 +585,16 @@ void StartUartDebugTask(void *argument){
 		sprintf(buffer, "Humidity: %f\n", environment_humidity);
 		UartSend(&huart1, buffer);
 		
+		sprintf(buffer, "Light: %d\n", environment_light);
+		UartSend(&huart1, buffer);
+		
 //		sprintf(buffer, "%lu\n", (unsigned long)HAL_RCC_GetHCLKFreq());
 //		UartSend(&huart1, buffer); 
 		
 		UartSend(&huart1, "\n");
 	
 		
-//		sprintf(buffer, "Light: %d\n", environment_light);
-//		UartSend(&huart1, buffer);
+
 		
 		osDelay(1000);
 	}
@@ -582,7 +602,7 @@ void StartUartDebugTask(void *argument){
 
 void StartGetSensorDataTask(void *argument){
 	
-	//uint8_t lightData_Raw[2];
+	uint8_t lightData_Raw[2];
 	
 	for(;;){
 		
@@ -590,15 +610,15 @@ void StartGetSensorDataTask(void *argument){
 		
 		environment_temperature_BMP180 = BMP180_GetTemperature();
 		
-//		if(BH1750_Send_Cmd(CONT_H_MODE) == HAL_OK){
-//			HAL_Delay(200);
-//			if(BH1750_Read_Dat(&lightData_Raw) == HAL_OK){
-//				environment_light = BH1750_Dat_To_Lux(&lightData_Raw);
-//			}
-//		}
-//		else{
-//			UartSend(&huart1, "CMD Send Error");
-//		}
+		if(BH1750_Send_Cmd(CONT_H_MODE) == HAL_OK){
+			HAL_Delay(200);
+			if(BH1750_Read_Dat(&lightData_Raw) == HAL_OK){
+				environment_light = BH1750_Dat_To_Lux(&lightData_Raw);
+			}
+		}
+		else{
+			UartSend(&huart1, "CMD Send Error");
+		}
 		
 		osDelay(500);
 	}
@@ -607,7 +627,7 @@ void StartGetSensorDataTask(void *argument){
 
 void StartGet1WireDataTask(void *argument){
 	
-	osDelay(2000);
+	osDelay(1000);
 	
 	for(;;){
 		DHT11_Read_Data(&environment_humidity, &environment_temperature_DHT11);
@@ -694,8 +714,9 @@ void u8g2_Init(u8g2_t *u8g2) {
 
 void u8g2_Draw(u8g2_t *u8g2) {
 	
-	u8g2_DrawXBMP(u8g2, 4, 0, 16, 16, icon_temp);
-	u8g2_DrawXBMP(u8g2, 4, 16, 16, 16, icon_temp);
+	u8g2_DrawXBMP(u8g2, 4,  0, 16, 16, icon_temp);
+	u8g2_DrawXBMP(u8g2, 64, 0, 16, 16, icon_temp);
+	u8g2_DrawXBMP(u8g2, 4, 16, 16, 16, icon_light);
 	u8g2_DrawXBMP(u8g2, 4, 32, 16, 16, icon_pres);
 	u8g2_DrawXBMP(u8g2, 4, 48, 16, 16, icon_humi);
 	
@@ -703,20 +724,23 @@ void u8g2_Draw(u8g2_t *u8g2) {
 	u8g2_SetFontDirection(u8g2, 0);
 	u8g2_SetFont(u8g2, u8g2_font_4x6_mf);
 	u8g2_DrawStr(u8g2, 16, 6, "1");
-	u8g2_DrawStr(u8g2, 16, 22, "2");
+	u8g2_DrawStr(u8g2, 76, 6, "2");
 	
 	u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
 
-	sprintf(str_buffer, "%4.2f", environment_temperature_BMP180);
+	sprintf(str_buffer, "%.2f", environment_temperature_BMP180);
 	u8g2_DrawStr(u8g2, 24, 12, str_buffer);
 
-	sprintf(str_buffer, "%4.2f", environment_temperature_DHT11);
+	sprintf(str_buffer, "%.2f", environment_temperature_DHT11);
+	u8g2_DrawStr(u8g2, 84, 12, str_buffer);
+	
+	sprintf(str_buffer, "%dlux", environment_light);
 	u8g2_DrawStr(u8g2, 24, 28, str_buffer);
 	
-	sprintf(str_buffer, "%4.2fhPa", environment_pressure);
+	sprintf(str_buffer, "%.2fhPa", environment_pressure);
 	u8g2_DrawStr(u8g2, 24, 44, str_buffer);
 	
-	sprintf(str_buffer, "%4.2f%%", environment_humidity);
+	sprintf(str_buffer, "%.2f%%", environment_humidity);
 	u8g2_DrawStr(u8g2, 24, 60, str_buffer);
 
 	
