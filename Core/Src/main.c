@@ -45,6 +45,25 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define KEY_SCAN_DELAY 20
+
+#define KEY_UP 			1
+#define KEY_3 			2
+#define KEY_2 			3
+#define KEY_1 			4
+#define KEY_RIGHT 	5
+#define KEY_6 			6
+#define KEY_5 			7
+#define KEY_4 			8
+#define KEY_LEFT 		9
+#define KEY_9 			10
+#define KEY_8 			11
+#define KEY_7 			12
+#define KEY_DOWN 		13
+#define KEY_ENTER 	14
+#define KEY_0 			15
+#define KEY_CANCEL 	16
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -108,6 +127,13 @@ const osThreadAttr_t get1WireDataTask_attributes = {
 	.priority = (osPriority_t) osPriorityRealtime,	//Need high priority for 1-wire communication.
 };
 
+osThreadId_t keyboardServiceTaskHandle;
+const osThreadAttr_t keyboardServiceTaskHandle_attributes = {
+	.name = "keyboardServ",
+	.stack_size = 128 * 4,
+	.priority = (osPriority_t) osPriorityNormal,
+};
+
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -125,6 +151,8 @@ void StartDefaultTask(void *argument);
 void StartUartDebugTask(void *argument);
 void StartGetSensorDataTask(void *argument);
 void StartGet1WireDataTask(void *argument);
+void StartKeyboardServiceTask(void *argument);
+
 
 uint8_t u8x8_stm32_gpio_and_delay(U8X8_UNUSED u8x8_t *u8x8, U8X8_UNUSED uint8_t msg, U8X8_UNUSED uint8_t arg_int, U8X8_UNUSED void *arg_ptr);
 uint8_t u8x8_byte_4wire_hw_spi(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,void *arg_ptr);
@@ -214,6 +242,7 @@ int main(void)
 	uartDebugTaskHandle 			= 	osThreadNew(StartUartDebugTask, NULL, &uartDebugTask_attributes);
 	getSensorDataTaskHandle 	= 	osThreadNew(StartGetSensorDataTask, NULL, &getSensorDataTask_attributes);
 	get1WireDataTaskHandle	  = 	osThreadNew(StartGet1WireDataTask, NULL, &get1WireDataTask_attributes);
+	keyboardServiceTaskHandle = 	osThreadNew(StartKeyboardServiceTask, NULL, &keyboardServiceTaskHandle_attributes);
 	
   /* USER CODE END RTOS_THREADS */
 
@@ -473,7 +502,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(OLED_CS_GPIO_Port, OLED_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(DCDC_EN_GPIO_Port, DCDC_EN_Pin, GPIO_PIN_SET);
@@ -492,7 +521,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pins : PA4 PA5 PA6 PA7 */
   GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PB0 PB1 PB10 PB11
@@ -519,8 +548,8 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : PA8 */
   GPIO_InitStruct.Pin = GPIO_PIN_8;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PA11 PA15 */
@@ -637,6 +666,94 @@ void StartGet1WireDataTask(void *argument){
 
 }
 
+void StartKeyboardServiceTask(void *argument) {
+	
+	uint8_t col;
+	uint8_t key;
+	GPIO_InitTypeDef GPIO_InitStruct;
+	
+	for(;;){
+		col = 0;
+		key = 0;
+		
+		GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7;
+		GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+		GPIO_InitStruct.Pull = GPIO_PULLUP;
+		HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+		GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_10|GPIO_PIN_11;
+		GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+		GPIO_InitStruct.Pull = GPIO_NOPULL;
+		GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+		HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+		
+		if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_4) == 0){
+			HAL_Delay(KEY_SCAN_DELAY);
+			if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_4) == 0) col = 1;
+		}
+		else if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) == 0){
+			HAL_Delay(KEY_SCAN_DELAY);
+			if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) == 0) col = 2;
+		}
+		else if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6) == 0){
+			HAL_Delay(KEY_SCAN_DELAY);
+			if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6) == 0) col = 3;
+		}
+		else if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_7) == 0){
+			HAL_Delay(KEY_SCAN_DELAY);
+			if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_7) == 0) col = 4;
+		}
+		
+		if(col != 0){
+			GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7;
+			GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+			GPIO_InitStruct.Pull = GPIO_PULLUP;
+			GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+			HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+			GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_10|GPIO_PIN_11;
+			GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+			GPIO_InitStruct.Pull = GPIO_NOPULL;
+			HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+			
+			switch(col){
+				case 1:
+					if		 (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_11) == 1) key = 1;
+					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_10) == 1) key = 2;
+					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1)  == 1) key = 3;
+					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0)  == 1) key = 4;
+					break;
+				
+				case 2:
+					if		 (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_11) == 1) key = 5;
+					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_10) == 1) key = 6;
+					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1)  == 1) key = 7;
+					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0)  == 1) key = 8;
+					break;
+				
+				case 3:
+					if		 (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_11) == 1) key = 9;
+					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_10) == 1) key = 10;
+					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1)  == 1) key = 11;
+					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0)  == 1) key = 12;
+					break;
+				case 4:
+					if		 (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_11) == 1) key = 13;
+					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_10) == 1) key = 14;
+					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1)  == 1) key = 15;
+					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0)  == 1) key = 16;
+					break;
+			
+				default:
+					break;
+			}
+		
+		}	
+		
+		osDelay(50);
+	}
+
+
+}
+
 uint8_t u8x8_byte_4wire_hw_spi(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,void *arg_ptr) {
 	uint8_t i;
 	uint8_t *data = NULL;
@@ -714,7 +831,8 @@ void u8g2_Init(u8g2_t *u8g2) {
 
 void u8g2_Draw(u8g2_t *u8g2) {
 	
-	u8g2_DrawXBMP(u8g2, 4,  0, 16, 16, icon_temp);
+	u8g2_DrawXBMP(u8g2, 96, 32, 32, 32, icon_background);
+	u8g2_DrawXBMP(u8g2, 4, 0, 16, 16, icon_temp);
 	u8g2_DrawXBMP(u8g2, 64, 0, 16, 16, icon_temp);
 	u8g2_DrawXBMP(u8g2, 4, 16, 16, 16, icon_light);
 	u8g2_DrawXBMP(u8g2, 4, 32, 16, 16, icon_pres);
