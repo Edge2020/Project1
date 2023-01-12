@@ -203,7 +203,11 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 	
-	 OLED_Init();
+	HAL_PWR_EnableWakeUpPin(PWR_WAKEUP_PIN1);
+	SET_BIT(PWR->CR, PWR_CR_CWUF_Msk);
+	SET_BIT(PWR->CR, PWR_CR_CSBF_Msk);
+	
+	OLED_Init();
 
 	HAL_I2C_Init(&hi2c1);
 	BMP180_Init();
@@ -675,6 +679,14 @@ void StartKeyboardServiceTask(void *argument) {
 	for(;;){
 		col = 0;
 		key = 0;
+		
+		if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == 1){
+			//Enter standby mode.
+			while(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == 1);
+			HAL_GPIO_WritePin(DCDC_EN_GPIO_Port, DCDC_EN_Pin, GPIO_PIN_RESET);	//disable DCDC
+			SET_BIT(PWR->CR, PWR_CR_CWUF_Msk);
+			HAL_PWR_EnterSTANDBYMode();
+		}
 		
 		GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7;
 		GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
