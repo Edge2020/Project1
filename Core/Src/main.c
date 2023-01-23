@@ -27,6 +27,7 @@
 
 #include "oled.h"
 #include "uart.h"
+#include "flash.h"
 #include "sensor_bmp180.h"
 #include "sensor_BH1750.h"
 #include "sensor_DHT11.h"
@@ -82,24 +83,26 @@ SPI_HandleTypeDef hspi2;
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
+uint32_t readBuffer[3];
+
 float  		environment_pressure 						=	 0.0;
 float 		environment_temperature_BMP180 	=	 0.0;
 float 		environment_temperature_DHT11 	=	 0.0;
 uint16_t	environment_humidity 						=	 0;
 uint16_t  environment_light						  	=  0;
 
-float			limit_pressure		 = 1200;
-float			limit_temperature	 = 15.0;
-uint16_t 	limit_humidity		 = 60;
-uint16_t 	limit_light				 = 1000;
-
-char str_buffer[32];
+float			limit_pressure;
+float			limit_temperature;
+uint16_t 	limit_humidity;
+uint16_t 	limit_light;
 
 uint8_t UI_page = 0;
 uint8_t UI_subpage = 0;
 uint8_t UI_setting_selected = 0;
 uint8_t UI_setting_subselected = 0;
 uint8_t UI_SUBSELECTED_MAX = 0;
+
+char str_buffer[32];
 
 const char UI_setting_texts[3][8] = {
 		"Alarm",
@@ -241,6 +244,33 @@ int main(void)
 
 	HAL_I2C_Init(&hi2c1);
 	BMP180_Init();
+	
+	//read from flash page 127.		
+	readData(0x08000000 + 0x400 * 127, readBuffer, 3);
+	UartSend(&huart1, "Read data:\n");
+	sprintf(str_buffer, "%08x\n%08x\n%08x\n", readBuffer[0], readBuffer[1], readBuffer[2]);
+	UartSend(&huart1, str_buffer);
+	
+	if(readBuffer[0] == 0xFFFFFFFF && readBuffer[1] == 0xFFFFFFFF && readBuffer[2] == 0xFFFFFFFF){
+		
+		//first boot-up after flashing.
+		limit_pressure		 = 1200;
+		limit_temperature	 = 15.0;
+		limit_humidity		 = 60;
+		limit_light				 = 1000;
+		
+	}
+	else{
+		
+		limit_pressure 		= readBuffer[0];
+		limit_temperature = readBuffer[1];
+		limit_humidity 		= (readBuffer[2] >> 16) & 0xFFFF;
+		limit_light				= (readBuffer[2]) & 0xFFFF;	
+	
+	}
+	
+
+	
 //	BH1750_Send_Cmd(POWER_ON_CMD);
 //	BH1750_Send_Cmd(RESET_REGISTER);
 //	BH1750_Send_Cmd(CONT_H_MODE);
@@ -703,9 +733,24 @@ void StartKeyboardServiceTask(void *argument) {
 		if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == 1){
 			//Enter standby mode.
 			while(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == 1);
+			
+			uint32_t saveBuffer[3];
+			
+			saveBuffer[0] = limit_pressure;
+			saveBuffer[1] = limit_temperature;
+			saveBuffer[2] = (limit_humidity << 16) | limit_light;
+			
+			if(!(saveBuffer[0] == readBuffer[0] && saveBuffer[1] == readBuffer[1] && saveBuffer[2] == readBuffer[2])){
+				//save to flash page 127.			
+				writeData(0x08000000 + 0x400 * 127, saveBuffer, 3);
+				UartSend(&huart1, "[Data saved.]\n");
+			}
+			
 			HAL_Delay(100);
 			HAL_GPIO_WritePin(DCDC_EN_GPIO_Port, DCDC_EN_Pin, GPIO_PIN_RESET);	//disable DCDC
+			UartSend(&huart1, "[DC/DC disabled.]\n");
 			SET_BIT(PWR->CR, PWR_CR_CWUF_Msk);
+			UartSend(&huart1, "[Power off.]\n");
 			HAL_PWR_EnterSTANDBYMode();
 		}
 		
