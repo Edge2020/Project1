@@ -64,7 +64,7 @@ uint8_t DHT11_Read_Byte(void) {
 	return temp;
 }
 
-uint8_t DHT11_Read_Data(float *humi, float *temp) {
+uint8_t DHT11_Read_Data(uint8_t *humi, float *temp) {
 	uint8_t i;
 	uint8_t data[5];
 	
@@ -83,7 +83,7 @@ uint8_t DHT11_Read_Data(float *humi, float *temp) {
 		if(data[4] == (data[0] + data[1] + data[2] + data[3])){
 			UartSend(&huart1, "[CheckSum OK]\n");
 
-			*humi = (float)(data[0]);
+			*humi = (uint8_t)(data[0]);
 			*temp = (float)(data[2]) + (float)(data[3]) / 100;
 			
 			return 1; 

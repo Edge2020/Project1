@@ -64,6 +64,9 @@
 #define KEY_0 			15
 #define KEY_CANCEL 	16
 
+#define UI_PAGE_MAX 		1
+#define UI_SETTING_MAX 	2
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -79,13 +82,30 @@ SPI_HandleTypeDef hspi2;
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
-float  	environment_pressure 						=	 0.0;
-float 	environment_temperature_BMP180 	=	 0.0;
-float 	environment_temperature_DHT11 	=	 0.0;
-float		environment_humidity 						=	 0.0;
-uint16_t  environment_light						  =  0;
+float  		environment_pressure 						=	 0.0;
+float 		environment_temperature_BMP180 	=	 0.0;
+float 		environment_temperature_DHT11 	=	 0.0;
+uint16_t	environment_humidity 						=	 0;
+uint16_t  environment_light						  	=  0;
+
+float			limit_pressure		 = 1200;
+float			limit_temperature	 = 15.0;
+uint16_t 	limit_humidity		 = 60;
+uint16_t 	limit_light				 = 1000;
 
 char str_buffer[32];
+
+uint8_t UI_page = 0;
+uint8_t UI_subpage = 0;
+uint8_t UI_setting_selected = 0;
+uint8_t UI_setting_subselected = 0;
+uint8_t UI_SUBSELECTED_MAX = 0;
+
+const char UI_setting_texts[3][8] = {
+		"Alarm",
+		"Wi-Fi",
+		"Upload",
+	};
 
 /* Definitions for tasks */
 
@@ -99,9 +119,9 @@ const osThreadAttr_t _attributes = {
 */
 
 
-osThreadId_t defaultTaskHandle;
-const osThreadAttr_t defaultTask_attributes = {
-  .name = "defaultTask",
+osThreadId_t OLEDTaskHandle;
+const osThreadAttr_t OLEDTask_attributes = {
+  .name = "OLEDTask",
   .stack_size = 128 * 16,
   .priority = (osPriority_t) osPriorityNormal,
 };
@@ -131,7 +151,14 @@ osThreadId_t keyboardServiceTaskHandle;
 const osThreadAttr_t keyboardServiceTaskHandle_attributes = {
 	.name = "keyboardServ",
 	.stack_size = 128 * 4,
-	.priority = (osPriority_t) osPriorityNormal,
+	.priority = (osPriority_t) osPriorityNormal2,
+};
+
+osThreadId_t buzzerTaskHandle;
+const osThreadAttr_t buzzerTaskHandle_attributes = {
+	.name = "buzzer",
+	.stack_size = 128 * 2,
+	.priority = (osPriority_t) osPriorityNormal1,
 };
 
 /* USER CODE BEGIN PV */
@@ -147,17 +174,20 @@ static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
 
 
-void StartDefaultTask(void *argument);
+void StartOLEDTask(void *argument);
 void StartUartDebugTask(void *argument);
 void StartGetSensorDataTask(void *argument);
 void StartGet1WireDataTask(void *argument);
 void StartKeyboardServiceTask(void *argument);
+void StartBuzzerTask(void *argument);
 
 
 uint8_t u8x8_stm32_gpio_and_delay(U8X8_UNUSED u8x8_t *u8x8, U8X8_UNUSED uint8_t msg, U8X8_UNUSED uint8_t arg_int, U8X8_UNUSED void *arg_ptr);
 uint8_t u8x8_byte_4wire_hw_spi(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,void *arg_ptr);
 void u8g2_Init(u8g2_t *u8g2);
 void u8g2_Draw(u8g2_t *u8g2);
+
+void draw_inputBox(u8g2_t *u8g2, uint8_t x, uint8_t y, uint8_t w, uint8_t h, float value);
 
 
 /* USER CODE BEGIN PFP */
@@ -237,16 +267,13 @@ int main(void)
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* creation of defaultTask */
-  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
-
-  /* USER CODE BEGIN RTOS_THREADS */
-  /* add threads, ... */
 	
+  OLEDTaskHandle 						=   osThreadNew(StartOLEDTask, NULL, &OLEDTask_attributes);
 	uartDebugTaskHandle 			= 	osThreadNew(StartUartDebugTask, NULL, &uartDebugTask_attributes);
 	getSensorDataTaskHandle 	= 	osThreadNew(StartGetSensorDataTask, NULL, &getSensorDataTask_attributes);
 	get1WireDataTaskHandle	  = 	osThreadNew(StartGet1WireDataTask, NULL, &get1WireDataTask_attributes);
 	keyboardServiceTaskHandle = 	osThreadNew(StartKeyboardServiceTask, NULL, &keyboardServiceTaskHandle_attributes);
+	buzzerTaskHandle					=		osThreadNew(StartBuzzerTask, NULL, &buzzerTaskHandle_attributes);
 	
   /* USER CODE END RTOS_THREADS */
 
@@ -264,7 +291,7 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-		
+
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -528,13 +555,18 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB0 PB1 PB10 PB11
-                           PB4 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_10|GPIO_PIN_11
-                          |GPIO_PIN_4;
+  /*Configure GPIO pins : PB0 PB1 PB10 PB11 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_10|GPIO_PIN_11;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+	
+	/*Configure GPIO pins : PB4 */
+	GPIO_InitStruct.Pin = GPIO_PIN_4;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PB2 PB14 PB3 PB5 */
@@ -574,14 +606,7 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE END 4 */
 
-/* USER CODE BEGIN Header_StartDefaultTask */
-/**
-  * @brief  Function implementing the defaultTask thread.
-  * @param  argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void *argument)
+void StartOLEDTask(void *argument)
 {
 	//char buffer[32];
 	u8g2_t u8g2;
@@ -615,7 +640,7 @@ void StartUartDebugTask(void *argument){
 		sprintf(buffer, "Temperature(DHT11): %f\n", environment_temperature_DHT11);
 		UartSend(&huart1, buffer);
 		
-		sprintf(buffer, "Humidity: %f\n", environment_humidity);
+		sprintf(buffer, "Humidity: %d\n", environment_humidity);
 		UartSend(&huart1, buffer);
 		
 		sprintf(buffer, "Light: %d\n", environment_light);
@@ -625,9 +650,6 @@ void StartUartDebugTask(void *argument){
 //		UartSend(&huart1, buffer); 
 		
 		UartSend(&huart1, "\n");
-	
-		
-
 		
 		osDelay(1000);
 	}
@@ -649,11 +671,8 @@ void StartGetSensorDataTask(void *argument){
 				environment_light = BH1750_Dat_To_Lux(&lightData_Raw);
 			}
 		}
-		else{
-			UartSend(&huart1, "CMD Send Error");
-		}
 		
-		osDelay(500);
+		osDelay(1000);
 	}
 
 }
@@ -671,6 +690,7 @@ void StartGet1WireDataTask(void *argument){
 }
 
 void StartKeyboardServiceTask(void *argument) {
+	while(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == 1);	//to avoid unexpected poweroff after WKUP.
 	
 	uint8_t col;
 	uint8_t key;
@@ -679,10 +699,11 @@ void StartKeyboardServiceTask(void *argument) {
 	for(;;){
 		col = 0;
 		key = 0;
-		
+
 		if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == 1){
 			//Enter standby mode.
 			while(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == 1);
+			HAL_Delay(100);
 			HAL_GPIO_WritePin(DCDC_EN_GPIO_Port, DCDC_EN_Pin, GPIO_PIN_RESET);	//disable DCDC
 			SET_BIT(PWR->CR, PWR_CR_CWUF_Msk);
 			HAL_PWR_EnterSTANDBYMode();
@@ -733,14 +754,12 @@ void StartKeyboardServiceTask(void *argument) {
 					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1)  == 1) key = 3;
 					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0)  == 1) key = 4;
 					break;
-				
 				case 2:
 					if		 (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_11) == 1) key = 5;
 					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_10) == 1) key = 6;
 					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1)  == 1) key = 7;
 					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0)  == 1) key = 8;
 					break;
-				
 				case 3:
 					if		 (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_11) == 1) key = 9;
 					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_10) == 1) key = 10;
@@ -753,14 +772,163 @@ void StartKeyboardServiceTask(void *argument) {
 					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1)  == 1) key = 15;
 					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0)  == 1) key = 16;
 					break;
+				default:
+					break;
+			}
+			
+			switch(key){
+				case KEY_LEFT:
+					if(UI_page != 0){
+						if(UI_subpage == 0) UI_page--;
+					}
+					if(UI_page == 1){
+						if(UI_subpage == 1){
+							switch(UI_setting_subselected){
+								case 0:
+									if(limit_temperature >= 1) limit_temperature--;
+									break;
+								
+								case 1:
+									if(limit_light >= 100) limit_light -= 100;
+									break;
+								
+								case 2:
+									if(limit_pressure >= 100) limit_pressure -=100;
+									break;
+								
+								case 3:
+									if(limit_humidity >= 1) limit_humidity--;
+									break;
+							
+								default:
+									break;
+							}
+						
+						}
+					}
+					break;
+				
+				case KEY_RIGHT:
+					if(UI_page != UI_PAGE_MAX){
+						if(UI_subpage == 0) UI_page++;
+					}
+					if(UI_page == 1){
+						if(UI_subpage == 1){
+							switch(UI_setting_subselected){
+								case 0:
+									if(limit_temperature <= 99) limit_temperature++;
+									break;
+								
+								case 1:
+									if(limit_light <= 65525) limit_light += 100;
+									break;
+								
+								case 2:
+									if(limit_pressure <= 2900) limit_pressure += 100;
+									break;
+								
+								case 3:
+									if(limit_humidity <= 99) limit_humidity++;
+									break;
+							
+								default:
+									break;
+							}
+						
+						}
+					}
+					break;
+				
+				case KEY_UP:
+					if(UI_page == 1){
+						if(UI_subpage == 0){
+							if(UI_setting_selected != 0) UI_setting_selected--;
+						}
+						else{
+							if(UI_setting_subselected != 0) UI_setting_subselected--;
+						}						
+					}
+					break;
+
+				case KEY_DOWN:
+					if(UI_page == 1){
+						if(UI_subpage == 0){
+							if(UI_setting_selected != UI_SETTING_MAX) UI_setting_selected++;
+						}
+						else{
+							if(UI_setting_subselected != UI_SUBSELECTED_MAX) UI_setting_subselected++;
+						}
+					}
+					break;
+					
+				case KEY_ENTER:
+					if(UI_page == 1){
+						UI_subpage = UI_setting_selected + 1;
+						switch(UI_subpage){
+							case 1:
+								UI_SUBSELECTED_MAX = 3;
+								break;
+							
+							case 2:
+								UI_SUBSELECTED_MAX = 3;
+								break;
+							
+							case 3:
+								UI_SUBSELECTED_MAX = 3;
+								break;
+							
+							default:
+								break;
+						}
+					}
+					break;
+					
+				case KEY_CANCEL:
+					if(UI_page == 1){
+						if(UI_subpage != 0){
+							UI_subpage = 0;
+						}
+					}
+					break;
 			
 				default:
 					break;
 			}
-		
+			
+			HAL_Delay(200);
 		}	
 		
-		osDelay(50);
+		osDelay(10);
+	}
+}
+
+void StartBuzzerTask(void *argument) {
+	
+	osDelay(1000);
+	
+	for(;;){
+		
+		if(environment_light > limit_light || 
+			 environment_pressure > limit_pressure ||
+			 environment_humidity > limit_humidity ||
+			 ((environment_temperature_DHT11 + environment_temperature_BMP180) / 2) > limit_temperature){
+		
+			for(uint8_t i = 0; i < 64; i++){
+				HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_4);
+				delay_us(500000 / 294);
+			}
+			for(uint8_t i = 0; i < 64; i++){
+				HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_4);
+				delay_us(500000 / 350);
+			}
+			for(uint8_t i = 0; i < 96; i++){
+				HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_4);
+				delay_us(500000 / 441);
+			}
+			
+		}
+
+		osDelay(1000);
 	}
 
 
@@ -843,39 +1011,92 @@ void u8g2_Init(u8g2_t *u8g2) {
 
 void u8g2_Draw(u8g2_t *u8g2) {
 	
-	u8g2_DrawXBMP(u8g2, 96, 32, 32, 32, icon_background);
-	u8g2_DrawXBMP(u8g2, 4, 0, 16, 16, icon_temp);
-	u8g2_DrawXBMP(u8g2, 64, 0, 16, 16, icon_temp);
-	u8g2_DrawXBMP(u8g2, 4, 16, 16, 16, icon_light);
-	u8g2_DrawXBMP(u8g2, 4, 32, 16, 16, icon_pres);
-	u8g2_DrawXBMP(u8g2, 4, 48, 16, 16, icon_humi);
-	
-	u8g2_SetFontDirection(u8g2, 1);
-	u8g2_SetFontDirection(u8g2, 0);
-	u8g2_SetFont(u8g2, u8g2_font_4x6_mf);
-	u8g2_DrawStr(u8g2, 16, 6, "1");
-	u8g2_DrawStr(u8g2, 76, 6, "2");
-	
-	u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
+	switch(UI_page){
+		case 0:
+			u8g2_DrawXBMP(u8g2, 96, 32, 32, 32, icon_background);
+		
+			u8g2_DrawXBMP(u8g2, 4, 0, 16, 16, icon_temp);
+			u8g2_DrawXBMP(u8g2, 64, 0, 16, 16, icon_temp);
+			u8g2_DrawXBMP(u8g2, 4, 16, 16, 16, icon_light);
+			u8g2_DrawXBMP(u8g2, 4, 32, 16, 16, icon_pres);
+			u8g2_DrawXBMP(u8g2, 4, 48, 16, 16, icon_humi);
+			
+			u8g2_SetFontDirection(u8g2, 1);
+			u8g2_SetFontDirection(u8g2, 0);
+			u8g2_SetFont(u8g2, u8g2_font_4x6_mf);
+			u8g2_DrawStr(u8g2, 16, 6, "1");
+			u8g2_DrawStr(u8g2, 76, 6, "2");
+			
+			u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
 
-	sprintf(str_buffer, "%.2f", environment_temperature_BMP180);
-	u8g2_DrawStr(u8g2, 24, 12, str_buffer);
+			sprintf(str_buffer, "%.2f", environment_temperature_BMP180);
+			u8g2_DrawStr(u8g2, 24, 12, str_buffer);
 
-	sprintf(str_buffer, "%.2f", environment_temperature_DHT11);
-	u8g2_DrawStr(u8g2, 84, 12, str_buffer);
+			sprintf(str_buffer, "%.2f", environment_temperature_DHT11);
+			u8g2_DrawStr(u8g2, 84, 12, str_buffer);
+			
+			sprintf(str_buffer, "%dlux", environment_light);
+			u8g2_DrawStr(u8g2, 24, 28, str_buffer);
+			
+			sprintf(str_buffer, "%.2fhPa", environment_pressure);
+			u8g2_DrawStr(u8g2, 24, 44, str_buffer);
+			
+			sprintf(str_buffer, "%d%%", environment_humidity);
+			u8g2_DrawStr(u8g2, 24, 60, str_buffer);
+			break;
+		
+		case 1:
+			switch(UI_subpage){
+				case 0:
+					u8g2_DrawXBMP(u8g2, 96, 32, 32, 32, icon_background_setting);
+					u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
+					for(int i = 0; i < 3; i++){
+						u8g2_DrawStr(u8g2, 16, 16 * (i + 1), UI_setting_texts[i]);
+						if(i == UI_setting_selected){
+							u8g2_DrawStr(u8g2, 4, 16 * (i + 1), ">");
+						}
+					}
+					break;
+					
+				case 1:	//alarm
+					u8g2_DrawStr(u8g2, 4, 16 * (UI_setting_subselected + 1) - 4, ">");
+					u8g2_DrawXBMP(u8g2, 96, 32, 32, 32, icon_alarm);
+					u8g2_DrawXBMP(u8g2, 16, 0, 16, 16, icon_temp);
+					u8g2_DrawXBMP(u8g2, 16, 16, 16, 16, icon_light);
+					u8g2_DrawXBMP(u8g2, 16, 32, 16, 16, icon_pres);
+					u8g2_DrawXBMP(u8g2, 16, 48, 16, 16, icon_humi);
+				
+					sprintf(str_buffer, "%.2f", limit_temperature);
+					u8g2_DrawStr(u8g2, 36, 12, str_buffer);	
+				
+					sprintf(str_buffer, "%dlux", limit_light);
+					u8g2_DrawStr(u8g2, 36, 28, str_buffer);
+					
+					sprintf(str_buffer, "%.2fhPa", limit_pressure);
+					u8g2_DrawStr(u8g2, 36, 44, str_buffer);
+					
+					sprintf(str_buffer, "%d%%", limit_humidity);
+					u8g2_DrawStr(u8g2, 36, 60, str_buffer);
+					break;
+				
+				case 2:	//wifi
+					
+					break;
+				
+				case 3:	//upload
+					
+					break;
+					
+				default:
+					break;
+			}
+			break;
 	
-	sprintf(str_buffer, "%dlux", environment_light);
-	u8g2_DrawStr(u8g2, 24, 28, str_buffer);
-	
-	sprintf(str_buffer, "%.2fhPa", environment_pressure);
-	u8g2_DrawStr(u8g2, 24, 44, str_buffer);
-	
-	sprintf(str_buffer, "%.2f%%", environment_humidity);
-	u8g2_DrawStr(u8g2, 24, 60, str_buffer);
+		default:
+			break;
+	}
 
-	
 }
-
 
 /**
   * @brief  Period elapsed callback in non blocking mode
