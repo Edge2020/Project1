@@ -7,6 +7,6 @@
 
 #define UART_TIMEOUT (1000)
 
-#define UartSend(_HUART, _STR) HAL_UART_Transmit(_HUART, _STR, strlen(_STR), UART_TIMEOUT)
+#define UartSend(_HUART, _STR) HAL_UART_Transmit(_HUART, (uint8_t *)_STR, strlen(_STR), UART_TIMEOUT)
 
 #endif

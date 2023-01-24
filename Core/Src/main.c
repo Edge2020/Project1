@@ -28,6 +28,7 @@
 #include "oled.h"
 #include "uart.h"
 #include "flash.h"
+#include "esp8266.h"
 #include "sensor_bmp180.h"
 #include "sensor_BH1750.h"
 #include "sensor_DHT11.h"
@@ -103,6 +104,9 @@ uint8_t UI_setting_subselected = 0;
 uint8_t UI_SUBSELECTED_MAX = 0;
 
 char str_buffer[32];
+
+extern uint8_t buffer_rx[UART2_BUFFER_SIZE];
+extern uint8_t buffer_tx[UART2_BUFFER_SIZE];
 
 const char UI_setting_texts[3][8] = {
 		"Alarm",
@@ -268,7 +272,8 @@ int main(void)
 		limit_light				= (readBuffer[2]) & 0xFFFF;	
 	
 	}
-	
+
+	//__HAL_UART_ENABLE_IT(&huart2, UART_IT_IDLE);
 
 	
 //	BH1750_Send_Cmd(POWER_ON_CMD);
@@ -709,7 +714,15 @@ void StartGetSensorDataTask(void *argument){
 
 void StartGet1WireDataTask(void *argument){
 	
+	osDelay(10000);
+	
+	
+	UartSend(&huart2, "AT+RST\r\n");
 	osDelay(1000);
+	UartSend(&huart2, "AT+CWMODE=2\r\n");
+	osDelay(1000);
+	UartSend(&huart2, "AT+CWSAP=""Edge"",""00000000"",1,3\r\n");
+	
 	
 	for(;;){
 		DHT11_Read_Data(&environment_humidity, &environment_temperature_DHT11);
