@@ -4,8 +4,6 @@
 #include "main.h"
 #include "uart.h"
 
-#define UART2_BUFFER_SIZE 256 
-
-void wifi_send(uint8_t *str);
+void wifi_send(char *str);
 
 #endif

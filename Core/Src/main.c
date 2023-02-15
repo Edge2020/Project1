@@ -99,14 +99,34 @@ uint16_t 	limit_light;
 
 uint8_t UI_page = 0;
 uint8_t UI_subpage = 0;
+uint8_t UI_wifi_page = 0;
 uint8_t UI_setting_selected = 0;
 uint8_t UI_setting_subselected = 0;
 uint8_t UI_SUBSELECTED_MAX = 0;
 
 char str_buffer[32];
 
-extern uint8_t buffer_rx[UART2_BUFFER_SIZE];
-extern uint8_t buffer_tx[UART2_BUFFER_SIZE];
+u8g2_t u8g2;
+
+
+#define UART2_BUFFER_SIZE 2048
+char buffer_rx[UART2_BUFFER_SIZE];
+uint8_t a_buffer_rx;
+uint32_t count_rx = 0;
+
+#define WIFI_ACTION_NONE 0
+#define WIFI_ACTION_SCAN 1
+uint8_t wifi_action_now = 0;
+
+typedef struct {
+	uint8_t ecn;
+	uint8_t ssid[32];
+	uint8_t mac[6];
+} wifi_info_typedef;
+
+#define WIFI_LIST_INDEX_MAX 30
+#define WIFI_SHOW_PAGE_MAX 4
+wifi_info_typedef wifi_info[WIFI_LIST_INDEX_MAX];
 
 const char UI_setting_texts[3][8] = {
 		"Alarm",
@@ -196,6 +216,64 @@ void u8g2_Draw(u8g2_t *u8g2);
 
 void draw_inputBox(u8g2_t *u8g2, uint8_t x, uint8_t y, uint8_t w, uint8_t h, float value);
 
+uint8_t char2hex(uint8_t ch1, uint8_t ch2);
+
+
+uint8_t char2hex(uint8_t ch_hi, uint8_t ch_lo)	{
+	uint8_t ans = 0x00;
+	
+	switch(ch_hi){
+		case '1': ans |= 0x10; break;
+		case '2': ans |= 0x20; break;
+		case '3': ans |= 0x30; break;
+		case '4': ans |= 0x40; break;
+		case '5': ans |= 0x50; break;
+		case '6': ans |= 0x60; break;
+		case '7': ans |= 0x70; break;
+		case '8': ans |= 0x80; break;
+		case '9': ans |= 0x90; break;
+		case 'A':
+		case 'a': ans |= 0xA0; break;
+		case 'B':
+		case 'b': ans |= 0xB0; break;
+		case 'C':
+		case 'c': ans |= 0xC0; break;
+		case 'D':
+		case 'd': ans |= 0xD0; break;
+		case 'E':
+		case 'e': ans |= 0xE0; break;
+		case 'F':
+		case 'f': ans |= 0xF0; break;
+		default: break;
+	}
+	
+		switch(ch_lo){
+		case '1': ans |= 0x01; break;
+		case '2': ans |= 0x02; break;
+		case '3': ans |= 0x03; break;
+		case '4': ans |= 0x04; break;
+		case '5': ans |= 0x05; break;
+		case '6': ans |= 0x06; break;
+		case '7': ans |= 0x07; break;
+		case '8': ans |= 0x08; break;
+		case '9': ans |= 0x09; break;
+		case 'A':
+		case 'a': ans |= 0x0A; break;
+		case 'B':
+		case 'b': ans |= 0x0B; break;
+		case 'C':
+		case 'c': ans |= 0x0C; break;
+		case 'D':
+		case 'd': ans |= 0x0D; break;
+		case 'E':
+		case 'e': ans |= 0x0E; break;
+		case 'F':
+		case 'f': ans |= 0x0F; break;
+		default: break;
+	}
+	
+	return ans;
+}
 
 /* USER CODE BEGIN PFP */
 
@@ -258,10 +336,10 @@ int main(void)
 	if(readBuffer[0] == 0xFFFFFFFF && readBuffer[1] == 0xFFFFFFFF && readBuffer[2] == 0xFFFFFFFF){
 		
 		//first boot-up after flashing.
-		limit_pressure		 = 1200;
-		limit_temperature	 = 15.0;
-		limit_humidity		 = 60;
-		limit_light				 = 1000;
+		limit_pressure		 = 2000;
+		limit_temperature	 = 40.0;
+		limit_humidity		 = 80;
+		limit_light				 = 2000;
 		
 	}
 	else{
@@ -272,8 +350,6 @@ int main(void)
 		limit_light				= (readBuffer[2]) & 0xFFFF;	
 	
 	}
-
-	//__HAL_UART_ENABLE_IT(&huart2, UART_IT_IDLE);
 
 	
 //	BH1750_Send_Cmd(POWER_ON_CMD);
@@ -304,7 +380,7 @@ int main(void)
   /* Create the thread(s) */
 	
   OLEDTaskHandle 						=   osThreadNew(StartOLEDTask, NULL, &OLEDTask_attributes);
-	uartDebugTaskHandle 			= 	osThreadNew(StartUartDebugTask, NULL, &uartDebugTask_attributes);
+//	uartDebugTaskHandle 			= 	osThreadNew(StartUartDebugTask, NULL, &uartDebugTask_attributes);
 	getSensorDataTaskHandle 	= 	osThreadNew(StartGetSensorDataTask, NULL, &getSensorDataTask_attributes);
 	get1WireDataTaskHandle	  = 	osThreadNew(StartGet1WireDataTask, NULL, &get1WireDataTask_attributes);
 	keyboardServiceTaskHandle = 	osThreadNew(StartKeyboardServiceTask, NULL, &keyboardServiceTaskHandle_attributes);
@@ -539,9 +615,91 @@ static void MX_USART2_UART_Init(void)
   {
     Error_Handler();
   }
+	HAL_UART_MspInit(&huart2);
+  HAL_UART_Receive_IT(&huart2, (uint8_t *)&a_buffer_rx, 1);
   /* USER CODE BEGIN USART2_Init 2 */
 
   /* USER CODE END USART2_Init 2 */
+
+}
+
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+
+	if(huart->Instance == USART2){
+		
+		if(wifi_action_now != WIFI_ACTION_NONE){
+			
+			if(count_rx >= UART2_BUFFER_SIZE - 1){
+					UartSend(&huart1, "!Usart2 buffer OVERFLOW!\n");
+					count_rx = 0;
+					memset(buffer_rx, 0x00, sizeof(buffer_rx));
+			}
+			else{
+				buffer_rx[count_rx++] = a_buffer_rx;
+				
+				if((buffer_rx[count_rx - 4] == 'O') && (buffer_rx[count_rx - 3] == 'K') && (buffer_rx[count_rx - 2] == '\r') && (buffer_rx[count_rx - 1] == '\n')){
+
+					HAL_UART_Transmit(&huart1, (uint8_t *)&buffer_rx, count_rx, 0xFFFF);
+				
+					switch(wifi_action_now){
+
+						case WIFI_ACTION_SCAN: {
+								uint8_t index = 0;
+							  char cat_tmp[2];
+								cat_tmp[1] = '\0';
+								for(uint32_t i = 0; i < count_rx; i++){
+									if(buffer_rx[i] == '+' && buffer_rx[i + 1] == 'C' && buffer_rx[i + 2] == 'W' && buffer_rx[i + 3] == 'L' && buffer_rx[i + 4] == 'A' && buffer_rx[i + 5] == 'P' && buffer_rx[i + 6] == ':'){
+										wifi_info[index].ecn = buffer_rx[i + 8] - '0';
+										strcpy((char *)wifi_info[index].ssid, "");
+									
+										i += 11;
+										
+										while(buffer_rx[i] != '"' && i < count_rx){
+											cat_tmp[0] = buffer_rx[i];
+											strcat((char *)wifi_info[index].ssid, cat_tmp);
+											i++;
+										}
+										
+										i++;
+										while(buffer_rx[i] != '"' && i < count_rx){
+											i++;
+										}
+										
+										i++;
+										for(uint8_t j = 0; j < 6; j++){
+											wifi_info[index].mac[j] = char2hex(buffer_rx[i + j * 3], buffer_rx[i + j * 3 + 1]);
+										}
+										
+										i += 20;
+										
+										index++;
+									}
+								}
+								
+//								UartSend(&huart1, "\nProcessed:\n");
+//								char tmp[128];
+//								for(uint8_t i = 0; i < WIFI_LIST_INDEX_MAX; i++){
+//									sprintf(tmp, "[index: %d]====\necn:%d\nssid:%s\nmac:%x:%x:%x:%x:%x:%x\n\n", i, wifi_info[i].ecn, wifi_info[i].ssid, wifi_info[i].mac[0], wifi_info[i].mac[1], wifi_info[i].mac[2], wifi_info[i].mac[3], wifi_info[i].mac[4], wifi_info[i].mac[5]);
+//									UartSend(&huart1, tmp);
+//								}
+								
+							}							
+							break;
+					
+						default:
+							break;
+					}
+					
+					wifi_action_now = WIFI_ACTION_NONE;
+					count_rx = 0;
+					memset(buffer_rx, 0x00, sizeof(buffer_rx));
+
+				}
+			}
+		}
+		HAL_UART_Receive_IT(&huart2, (uint8_t *)&a_buffer_rx, 1);
+	}
 
 }
 
@@ -628,12 +786,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : DCDC_EN_Pin */
-  GPIO_InitStruct.Pin = DCDC_EN_Pin;
+  /*Configure GPIO pin : DCDC_EN_Pin PA13*/
+  GPIO_InitStruct.Pin = DCDC_EN_Pin | GPIO_PIN_13;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-  HAL_GPIO_Init(DCDC_EN_GPIO_Port, &GPIO_InitStruct);
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
 }
 
@@ -644,7 +802,6 @@ static void MX_GPIO_Init(void)
 void StartOLEDTask(void *argument)
 {
 	//char buffer[32];
-	u8g2_t u8g2;
 	OLED_RES_Set();	
 	u8g2_Init(&u8g2);
   for(;;)
@@ -714,15 +871,11 @@ void StartGetSensorDataTask(void *argument){
 
 void StartGet1WireDataTask(void *argument){
 	
-	osDelay(10000);
+	osDelay(3000);
 	
-	
-	UartSend(&huart2, "AT+RST\r\n");
-	osDelay(1000);
-	UartSend(&huart2, "AT+CWMODE=2\r\n");
-	osDelay(1000);
-	UartSend(&huart2, "AT+CWSAP=""Edge"",""00000000"",1,3\r\n");
-	
+	//Set up wifi.
+	UartSend(&huart2, "ATE0\r\n");	//Turn off echoing.
+	UartSend(&huart2, "AT+CWMODE=1\r\n");	//Set to STA mode.
 	
 	for(;;){
 		DHT11_Read_Data(&environment_humidity, &environment_temperature_DHT11);
@@ -863,6 +1016,12 @@ void StartKeyboardServiceTask(void *argument) {
 							}
 						
 						}
+						else if(UI_subpage == 2){
+							if(wifi_action_now == WIFI_ACTION_NONE){
+								if(UI_wifi_page != 0) UI_wifi_page--;
+							
+							}
+						}
 					}
 					break;
 				
@@ -893,6 +1052,12 @@ void StartKeyboardServiceTask(void *argument) {
 									break;
 							}
 						
+						}
+						else if(UI_subpage == 2){
+							if(wifi_action_now == WIFI_ACTION_NONE){
+								if(UI_wifi_page != WIFI_SHOW_PAGE_MAX) UI_wifi_page++;
+							
+							}
 						}
 					}
 					break;
@@ -928,7 +1093,11 @@ void StartKeyboardServiceTask(void *argument) {
 								break;
 							
 							case 2:
-								UI_SUBSELECTED_MAX = 3;
+								UI_SUBSELECTED_MAX = 4;
+								UI_wifi_page = 0;
+								wifi_action_now = WIFI_ACTION_SCAN;
+								UartSend(&huart2, "AT+CWLAP\r\n");
+							
 								break;
 							
 							case 3:
@@ -1138,6 +1307,17 @@ void u8g2_Draw(u8g2_t *u8g2) {
 					break;
 				
 				case 2:	//wifi
+					if(wifi_action_now == WIFI_ACTION_SCAN){
+						u8g2_DrawStr(u8g2, 32, 32, "Scanning...");
+					}
+					else if(wifi_action_now == WIFI_ACTION_NONE){
+						for(uint8_t i = 0; i < 5; i++){
+							u8g2_DrawStr(u8g2, 16, 12 * (i + 1), (char *)wifi_info[i + 5 * UI_wifi_page].ssid);
+						}
+						u8g2_DrawStr(u8g2, 4, 12 * (UI_setting_subselected + 1), ">");
+						sprintf(str_buffer, "%d/5", UI_wifi_page + 1);
+						u8g2_DrawStr(u8g2, 110, 12, str_buffer);
+					}
 					
 					break;
 				

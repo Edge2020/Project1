@@ -1,11 +1,11 @@
 #include "sensor_DHT11.h"
 
 #include <stdio.h>
-#include "uart.h"
+//#include "uart.h"
 
-char dbgbuffer[32];
+//char dbgbuffer[32];
 
-extern UART_HandleTypeDef huart1;
+//extern UART_HandleTypeDef huart1;
 
 
 //void delay_us(uint32_t us)
@@ -77,11 +77,11 @@ uint8_t DHT11_Read_Data(uint8_t *humi, float *temp) {
 		DHT11_Mode_Set_Output();
 		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_SET);
 		
-		sprintf(dbgbuffer, "[%x][%x][%x][%x][%x]", data[0], data[1], data[2], data[3], data[4]);
-		UartSend(&huart1, dbgbuffer);
+//		sprintf(dbgbuffer, "[%x][%x][%x][%x][%x]", data[0], data[1], data[2], data[3], data[4]);
+//		UartSend(&huart1, dbgbuffer);
 		
 		if(data[4] == (data[0] + data[1] + data[2] + data[3])){
-			UartSend(&huart1, "[CheckSum OK]\n");
+//			UartSend(&huart1, "[CheckSum OK]\n");
 
 			*humi = (uint8_t)(data[0]);
 			*temp = (float)(data[2]) + (float)(data[3]) / 100;
