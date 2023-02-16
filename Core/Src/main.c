@@ -114,9 +114,17 @@ char buffer_rx[UART2_BUFFER_SIZE];
 uint8_t a_buffer_rx;
 uint32_t count_rx = 0;
 
-#define WIFI_ACTION_NONE 0
-#define WIFI_ACTION_SCAN 1
-uint8_t wifi_action_now = 0;
+//Wi-Fi
+#define WIFI_ACTION_NONE 		0
+#define WIFI_ACTION_SCAN 		1
+#define WIFI_ACTION_CONN 		2
+#define WIFI_ACTION_DISCONN 3
+#define WIFI_ACTION_CHECK		4
+uint8_t wifi_action_now = WIFI_ACTION_NONE;
+
+#define WIFI_STATUS_CONN 		1
+#define WIFI_STATUS_DISCONN 2
+uint8_t wifi_status_now = WIFI_STATUS_DISCONN;
 
 typedef struct {
 	uint8_t ecn;
@@ -125,8 +133,12 @@ typedef struct {
 } wifi_info_typedef;
 
 #define WIFI_LIST_INDEX_MAX 30
-#define WIFI_SHOW_PAGE_MAX 4
+#define WIFI_SHOW_PAGE_MAX 5
+
 wifi_info_typedef wifi_info[WIFI_LIST_INDEX_MAX];
+wifi_info_typedef wifi_info_connect;
+
+uint8_t wifi_rssi_inverted = 0;
 
 const char UI_setting_texts[3][8] = {
 		"Alarm",
@@ -188,6 +200,13 @@ const osThreadAttr_t buzzerTaskHandle_attributes = {
 	.priority = (osPriority_t) osPriorityNormal1,
 };
 
+osThreadId_t wifiServiceTaskHandle;
+const osThreadAttr_t wifiServiceTaskHandle_attributes = {
+	.name = "wifiServ",
+	.stack_size = 128 * 1,
+	.priority = (osPriority_t) osPriorityNormal,
+};
+
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -207,7 +226,7 @@ void StartGetSensorDataTask(void *argument);
 void StartGet1WireDataTask(void *argument);
 void StartKeyboardServiceTask(void *argument);
 void StartBuzzerTask(void *argument);
-
+void StartWifiServiceTask(void *argument);
 
 uint8_t u8x8_stm32_gpio_and_delay(U8X8_UNUSED u8x8_t *u8x8, U8X8_UNUSED uint8_t msg, U8X8_UNUSED uint8_t arg_int, U8X8_UNUSED void *arg_ptr);
 uint8_t u8x8_byte_4wire_hw_spi(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,void *arg_ptr);
@@ -322,6 +341,8 @@ int main(void)
 	SET_BIT(PWR->CR, PWR_CR_CWUF_Msk);
 	SET_BIT(PWR->CR, PWR_CR_CSBF_Msk);
 	
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_13, GPIO_PIN_SET);
+	
 	OLED_Init();
 
 	HAL_I2C_Init(&hi2c1);
@@ -385,6 +406,7 @@ int main(void)
 	get1WireDataTaskHandle	  = 	osThreadNew(StartGet1WireDataTask, NULL, &get1WireDataTask_attributes);
 	keyboardServiceTaskHandle = 	osThreadNew(StartKeyboardServiceTask, NULL, &keyboardServiceTaskHandle_attributes);
 	buzzerTaskHandle					=		osThreadNew(StartBuzzerTask, NULL, &buzzerTaskHandle_attributes);
+	wifiServiceTaskHandle			=		osThreadNew(StartWifiServiceTask, NULL, &wifiServiceTaskHandle_attributes);
 	
   /* USER CODE END RTOS_THREADS */
 
@@ -637,7 +659,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 			}
 			else{
 				buffer_rx[count_rx++] = a_buffer_rx;
-				
+
 				if((buffer_rx[count_rx - 4] == 'O') && (buffer_rx[count_rx - 3] == 'K') && (buffer_rx[count_rx - 2] == '\r') && (buffer_rx[count_rx - 1] == '\n')){
 
 					HAL_UART_Transmit(&huart1, (uint8_t *)&buffer_rx, count_rx, 0xFFFF);
@@ -686,7 +708,68 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 								
 							}							
 							break;
-					
+											
+						case WIFI_ACTION_CONN: {
+							wifi_status_now = WIFI_STATUS_CONN;
+							
+							}
+							break;
+							
+						case WIFI_ACTION_DISCONN: {
+							wifi_status_now = WIFI_STATUS_DISCONN;
+							UI_subpage = 0;
+							}
+							break;
+						
+						case WIFI_ACTION_CHECK: {
+							if(buffer_rx[0] == 'N' && buffer_rx[1] == 'o'){
+								wifi_status_now = WIFI_STATUS_DISCONN;
+							}
+							else{
+								wifi_status_now = WIFI_STATUS_CONN;
+								
+								char cat_tmp[2];
+								cat_tmp[1] = '\0';
+								uint16_t i = 0;
+
+								strcpy((char *)wifi_info_connect.ssid, "");
+							
+								i += 8;
+								
+								while(buffer_rx[i] != '"' && i < count_rx){
+									cat_tmp[0] = buffer_rx[i];
+									strcat((char *)wifi_info_connect.ssid, cat_tmp);
+									i++;
+								}
+								
+								i += 3;
+								
+								for(uint8_t j = 0; j < 6; j++){
+									wifi_info_connect.mac[j] = char2hex(buffer_rx[i + j * 3], buffer_rx[i + j * 3 + 1]);
+								}
+								
+								i += 20;
+								
+								while(buffer_rx[i] != ',' && i < count_rx){
+									i++;
+								}
+								
+								i += 2;
+								
+								if(buffer_rx[i + 2] >= '0' && buffer_rx[i + 2] <= '9'){
+									wifi_rssi_inverted = (buffer_rx[i] - '0') * 100 + (buffer_rx[i + 1] - '0') * 10 + (buffer_rx[i + 2] - '0');
+								}
+								else if(buffer_rx[i + 1] >= '0' && buffer_rx[i + 1] <= '9'){
+									wifi_rssi_inverted = (buffer_rx[i] - '0') * 10 + (buffer_rx[i + 1] - '0');
+								}
+								else{
+									wifi_rssi_inverted = (buffer_rx[i] - '0');
+								}
+								
+							}
+						}
+						break;
+						
 						default:
 							break;
 					}
@@ -695,6 +778,36 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 					count_rx = 0;
 					memset(buffer_rx, 0x00, sizeof(buffer_rx));
 
+				}
+				else if((buffer_rx[count_rx - 7] == 'E') && (buffer_rx[count_rx - 6] == 'R') && (buffer_rx[count_rx - 5] == 'R') && (buffer_rx[count_rx - 4] == 'O') && (buffer_rx[count_rx - 3] == 'R') && (buffer_rx[count_rx - 2] == '\r') && (buffer_rx[count_rx - 1] == '\n')){
+					
+					HAL_UART_Transmit(&huart1, (uint8_t *)&buffer_rx, count_rx, 0xFFFF);
+				
+					switch(wifi_action_now){
+						case WIFI_ACTION_SCAN: {
+						
+						
+						}
+						break;
+						
+						case WIFI_ACTION_CONN: {
+							wifi_status_now = WIFI_STATUS_DISCONN;
+							
+							wifi_info_connect.ecn = 0;
+							strcpy((char *)wifi_info_connect.ssid, "");
+							for(uint8_t i = 0; i < 6; i++) wifi_info_connect.ssid[i] = 0x00;
+						
+						}
+						break;
+						
+						default:
+							break;
+					}
+					
+					wifi_action_now = WIFI_ACTION_NONE;
+					count_rx = 0;
+					memset(buffer_rx, 0x00, sizeof(buffer_rx));
+					
 				}
 			}
 		}
@@ -871,16 +984,41 @@ void StartGetSensorDataTask(void *argument){
 
 void StartGet1WireDataTask(void *argument){
 	
-	osDelay(3000);
-	
-	//Set up wifi.
-	UartSend(&huart2, "ATE0\r\n");	//Turn off echoing.
-	UartSend(&huart2, "AT+CWMODE=1\r\n");	//Set to STA mode.
+	osDelay(1000);
 	
 	for(;;){
 		DHT11_Read_Data(&environment_humidity, &environment_temperature_DHT11);
 
 		osDelay(2000);
+	}
+
+}
+
+void StartWifiServiceTask(void *argument) {
+	
+	osDelay(1000);
+	
+	//Set up wifi.
+	UartSend(&huart2, "ATE0\r\n");	//Disable echoing.
+	osDelay(100);
+	UartSend(&huart2, "AT+CWMODE=1\r\n");	//Set to STA mode.
+	osDelay(100);
+	UartSend(&huart2, "AT+CWRECONNCFG=0,0\r\n");	//Disable auto-reconnect
+	osDelay(4000);
+	wifi_action_now = WIFI_ACTION_CHECK;
+	UartSend(&huart2, "AT+CWJAP?\r\n");
+	osDelay(1000);
+	
+	for(;;){
+		if((wifi_action_now == WIFI_ACTION_NONE || wifi_action_now == WIFI_ACTION_CHECK) && wifi_status_now == WIFI_STATUS_CONN && UI_subpage == 0){
+			wifi_action_now = WIFI_ACTION_CHECK;
+			
+			UartSend(&huart1, "[Wi-Fi check command sent.]\n");
+			osDelay(100);
+			UartSend(&huart2, "AT+CWJAP?\r\n");
+			
+		}
+		osDelay(5000);
 	}
 
 }
@@ -891,6 +1029,8 @@ void StartKeyboardServiceTask(void *argument) {
 	uint8_t col;
 	uint8_t key;
 	GPIO_InitTypeDef GPIO_InitStruct;
+	
+	char str_buffer[64];
 	
 	for(;;){
 		col = 0;
@@ -1086,26 +1226,79 @@ void StartKeyboardServiceTask(void *argument) {
 					
 				case KEY_ENTER:
 					if(UI_page == 1){
-						UI_subpage = UI_setting_selected + 1;
 						switch(UI_subpage){
-							case 1:
-								UI_SUBSELECTED_MAX = 3;
+							case 0: {
+									if(wifi_action_now == WIFI_ACTION_NONE){
+										UI_subpage = UI_setting_selected + 1;
+										switch(UI_subpage){
+											case 1:
+												UI_SUBSELECTED_MAX = 3;
+												break;
+											
+											case 2:
+												UI_SUBSELECTED_MAX = 4;
+												UI_wifi_page = 0;
+												if(wifi_status_now == WIFI_STATUS_DISCONN){
+													for(uint8_t i = 0; i < WIFI_LIST_INDEX_MAX; i++){
+														strcpy((char *)wifi_info[i].ssid, "");
+														wifi_info[i].ecn = 0;
+														for(uint8_t j = 0; j < 6; j++) wifi_info[i].mac[j] = 0x00;
+													}
+												
+													wifi_action_now = WIFI_ACTION_SCAN;
+													UartSend(&huart2, "AT+CWLAP\r\n");
+												}
+												break;
+											
+											case 3:
+												UI_SUBSELECTED_MAX = 3;
+												break;
+											
+											default:
+												break;
+										}
+									}
+								}
 								break;
 							
-							case 2:
-								UI_SUBSELECTED_MAX = 4;
-								UI_wifi_page = 0;
-								wifi_action_now = WIFI_ACTION_SCAN;
-								UartSend(&huart2, "AT+CWLAP\r\n");
-							
-								break;
-							
-							case 3:
-								UI_SUBSELECTED_MAX = 3;
-								break;
-							
+							case 2: {
+								if(wifi_status_now == WIFI_STATUS_DISCONN && wifi_action_now == WIFI_ACTION_NONE){
+									if(strcmp((char *)wifi_info[UI_setting_subselected + 5 * UI_wifi_page].ssid, "") != 0){
+										wifi_action_now = WIFI_ACTION_CONN;
+										wifi_info_connect = wifi_info[UI_setting_subselected + 5 * UI_wifi_page];
+										switch(wifi_info[UI_setting_subselected + 5 * UI_wifi_page].ecn){
+											case 0:
+												//OPEN
+												sprintf(str_buffer, "AT+CWJAP=\"%s\",\"\",\"%02x:%02x:%02x:%02x:%02x:%02x\"\r\n", 
+													wifi_info[UI_setting_subselected + 5 * UI_wifi_page].ssid,
+													wifi_info[UI_setting_subselected + 5 * UI_wifi_page].mac[0],
+													wifi_info[UI_setting_subselected + 5 * UI_wifi_page].mac[1],
+													wifi_info[UI_setting_subselected + 5 * UI_wifi_page].mac[2],
+													wifi_info[UI_setting_subselected + 5 * UI_wifi_page].mac[3],
+													wifi_info[UI_setting_subselected + 5 * UI_wifi_page].mac[4],
+													wifi_info[UI_setting_subselected + 5 * UI_wifi_page].mac[5]
+												);
+												UartSend(&huart2, str_buffer);
+												UartSend(&huart1, "[Wi-Fi connect command sent.]\n");
+												break;
+										
+											default:
+												break;
+										}
+										break;
+									}
+								}
+								else if(wifi_status_now == WIFI_STATUS_CONN){
+									wifi_action_now = WIFI_ACTION_DISCONN;
+									UartSend(&huart2, "AT+CWQAP\r\n");
+									UartSend(&huart1, "[Wi-Fi disconnect command sent.]\n");
+								}
+							}
+							break;
+
 							default:
 								break;
+								
 						}
 					}
 					break;
@@ -1240,7 +1433,30 @@ void u8g2_Draw(u8g2_t *u8g2) {
 	
 	switch(UI_page){
 		case 0:
-			u8g2_DrawXBMP(u8g2, 96, 32, 32, 32, icon_background);
+			
+		
+			if(wifi_status_now == WIFI_STATUS_CONN){
+				
+				if(wifi_rssi_inverted > 88){
+					u8g2_DrawXBMP(u8g2, 104, 40, 24, 24, icon_wifi_1);
+				}
+				else if(wifi_rssi_inverted > 78){
+					u8g2_DrawXBMP(u8g2, 104, 40, 24, 24, icon_wifi_2);
+				}
+				else if(wifi_rssi_inverted > 67){
+					u8g2_DrawXBMP(u8g2, 104, 40, 24, 24, icon_wifi_3);
+				}
+				else if(wifi_rssi_inverted > 55){
+					u8g2_DrawXBMP(u8g2, 104, 40, 24, 24, icon_wifi_4);
+				}
+				else{
+					u8g2_DrawXBMP(u8g2, 104, 40, 24, 24, icon_wifi_5);
+				}
+			
+			}
+			else{
+				u8g2_DrawXBMP(u8g2, 96, 32, 32, 32, icon_background);
+			}
 		
 			u8g2_DrawXBMP(u8g2, 4, 0, 16, 16, icon_temp);
 			u8g2_DrawXBMP(u8g2, 64, 0, 16, 16, icon_temp);
@@ -1310,13 +1526,28 @@ void u8g2_Draw(u8g2_t *u8g2) {
 					if(wifi_action_now == WIFI_ACTION_SCAN){
 						u8g2_DrawStr(u8g2, 32, 32, "Scanning...");
 					}
+					else if(wifi_action_now == WIFI_ACTION_CONN){
+						u8g2_DrawStr(u8g2, 32, 32, "Connecting...");
+					}
+					else if(wifi_action_now == WIFI_ACTION_DISCONN){
+						u8g2_DrawStr(u8g2, 32, 32, "Disconnecting...");
+					}
 					else if(wifi_action_now == WIFI_ACTION_NONE){
-						for(uint8_t i = 0; i < 5; i++){
-							u8g2_DrawStr(u8g2, 16, 12 * (i + 1), (char *)wifi_info[i + 5 * UI_wifi_page].ssid);
+						if(wifi_status_now == WIFI_STATUS_DISCONN){
+							for(uint8_t i = 0; i < 5; i++){
+								u8g2_DrawStr(u8g2, 16, 12 * (i + 1), (char *)wifi_info[i + 5 * UI_wifi_page].ssid);
+							}
+							u8g2_DrawStr(u8g2, 4, 12 * (UI_setting_subselected + 1), ">");
+							sprintf(str_buffer, "%d/6", UI_wifi_page + 1);
+							u8g2_DrawStr(u8g2, 110, 12, str_buffer);
 						}
-						u8g2_DrawStr(u8g2, 4, 12 * (UI_setting_subselected + 1), ">");
-						sprintf(str_buffer, "%d/5", UI_wifi_page + 1);
-						u8g2_DrawStr(u8g2, 110, 12, str_buffer);
+						else if(wifi_status_now == WIFI_STATUS_CONN){
+							u8g2_DrawStr(u8g2, 16, 12 , "Wi-Fi Connected");
+							sprintf(str_buffer, "SSID: %s", wifi_info_connect.ssid);
+							u8g2_DrawStr(u8g2, 16, 24 , str_buffer);
+							
+							u8g2_DrawStr(u8g2, 8, 48 , "[ENTER] > Disconnect");
+						}
 					}
 					
 					break;
