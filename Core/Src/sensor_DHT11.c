@@ -15,7 +15,7 @@
 //}
 
 #define CPU_FREQUENCY_MHZ	72
-volatile void delay_us(__IO uint32_t delay)
+void delay_us(__IO uint32_t delay)
 {
 	int last, curr, val;
 	int temp;
@@ -64,7 +64,7 @@ uint8_t DHT11_Read_Byte(void) {
 	return temp;
 }
 
-uint8_t DHT11_Read_Data(uint8_t *humi, float *temp) {
+uint8_t DHT11_Read_Data(uint16_t *humi, float *temp) {
 	uint8_t i;
 	uint8_t data[5];
 	
