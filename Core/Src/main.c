@@ -662,7 +662,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 
 	if(huart->Instance == USART2){
 		
-		if(wifi_action_now != WIFI_ACTION_NONE){
+		if(wifi_action_now != WIFI_ACTION_NONE || connection_status == 3){
 			if(count_rx >= UART2_BUFFER_SIZE - 1){
 					UartSend(&huart1, "!Usart2 buffer OVERFLOW!\n");
 					count_rx = 0;
@@ -670,6 +670,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 			}
 			else{
 				buffer_rx[count_rx++] = a_buffer_rx;
+				
+				if(buffer_rx[count_rx - 6] == 'D' && buffer_rx[count_rx - 5] == 'T' &&buffer_rx[count_rx - 4] == 'O' && buffer_rx[count_rx - 3] == 'K' && buffer_rx[count_rx - 2] == '\r' && buffer_rx[count_rx - 1] == '\n'){
+					wifi_action_now = WIFI_ACTION_RECEIVE;
+					UartSend(&huart1, "[TCP DATA]\n");
+				}
 
 				if((buffer_rx[count_rx - 4] == 'O') && (buffer_rx[count_rx - 3] == 'K') && (buffer_rx[count_rx - 2] == '\r') && (buffer_rx[count_rx - 1] == '\n')){
 
@@ -809,7 +814,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 							
 						case WIFI_ACTION_RECEIVE: {
 								UartSend(&huart1, "[Data received.]");
-								uint8_t i = 13;
+								uint8_t i = 3;
 								while(buffer_rx[i] != '@' && i < count_rx){
 									i++;
 								}
@@ -821,6 +826,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 									limit_humidity = (buffer_rx[i + 15] - '0') * 10 + (buffer_rx[i + 16] - '0');
 									limit_light = (buffer_rx[i + 18] - '0') * 10000 + (buffer_rx[i + 19] - '0') * 1000 + (buffer_rx[i + 20] - '0') * 100 + (buffer_rx[i + 21] - '0') * 10 + (buffer_rx[i + 22] - '0');
 								}
+						
 							}
 							break;
 							
@@ -1108,20 +1114,6 @@ void StartWifiServiceTask(void *argument) {
 				UartSend(&huart2, "AT+CIPSEND=30\r\n");
 				osDelay(500);
 				UartSend(&huart1, "[TCP data sent.]\n");
-			}
-			
-			retry = 0;
-			while(wifi_action_now != WIFI_ACTION_NONE){
-				if(retry >= 10) break;
-				retry++;
-				osDelay(500);
-			}
-			
-			if(wifi_action_now == WIFI_ACTION_NONE && connection_status == 3){
-				wifi_action_now = WIFI_ACTION_RECEIVE;
-				UartSend(&huart2, "AT+CIPRECVLEN?\r\n");
-				osDelay(500);
-				UartSend(&huart1, "[TCP receive sent.]\n");
 			}
 			
 		}
